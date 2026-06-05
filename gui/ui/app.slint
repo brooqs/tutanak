@@ -1,0 +1,236 @@
+import {
+    Button, ComboBox, LineEdit, TextEdit, TabWidget, CheckBox,
+    VerticalBox, HorizontalBox, GroupBox, ScrollView
+} from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "tutanak";
+    preferred-width: 780px;
+    preferred-height: 660px;
+    min-width: 560px;
+    min-height: 480px;
+
+    // --- main state ---
+    in property <[string]> stt-providers;
+    in property <[string]> summary-providers;
+    in-out property <string> stt-provider;
+    in-out property <string> summary-provider;
+    in-out property <string> output-lang: "tr";
+    in-out property <string> meeting-title: "Toplantı";
+    in-out property <bool> translate-too: false;
+    in-out property <bool> include-mic: true;
+
+    in property <bool> recording: false;
+    in property <bool> processing: false;
+    in property <string> status: "Hazır.";
+    in property <string> summary-text;
+    in property <string> transcript-text;
+    in property <string> saved-path;
+    in property <string> config-path;
+
+    // --- settings view ---
+    in-out property <bool> show-settings: false;
+    in-out property <string> e-stt-base;
+    in-out property <string> e-stt-model;
+    in-out property <string> e-stt-keyenv;
+    in-out property <string> e-sum-base;
+    in-out property <string> e-sum-model;
+    in-out property <string> e-sum-keyenv;
+    in-out property <string> e-chunk-mb;
+
+    // --- callbacks ---
+    callback toggle-record();
+    callback open-config();
+    callback open-settings();
+    callback save-settings();
+    callback close-settings();
+
+    // ===================== MAIN VIEW =====================
+    if !root.show-settings : VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalBox {
+            Text {
+                text: "tutanak — Toplantı Notu Asistanı";
+                font-size: 18px;
+                font-weight: 700;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "⚙ Ayarlar";
+                enabled: !root.recording && !root.processing;
+                clicked => { root.open-settings(); }
+            }
+        }
+
+        GroupBox {
+            title: "Sağlayıcılar";
+            VerticalBox {
+                spacing: 8px;
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        Text { text: "Transkript (STT)"; font-size: 12px; }
+                        ComboBox {
+                            model: root.stt-providers;
+                            current-value <=> root.stt-provider;
+                            enabled: !root.recording && !root.processing;
+                        }
+                    }
+                    VerticalBox {
+                        Text { text: "Özet (LLM)"; font-size: 12px; }
+                        ComboBox {
+                            model: root.summary-providers;
+                            current-value <=> root.summary-provider;
+                            enabled: !root.recording && !root.processing;
+                        }
+                    }
+                    VerticalBox {
+                        Text { text: "Dil"; font-size: 12px; }
+                        LineEdit {
+                            text <=> root.output-lang;
+                            enabled: !root.recording && !root.processing;
+                            width: 70px;
+                        }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Başlık"; font-size: 12px; }
+                        LineEdit {
+                            text <=> root.meeting-title;
+                            enabled: !root.recording && !root.processing;
+                        }
+                    }
+                    VerticalBox {
+                        Text { text: " "; font-size: 12px; }
+                        CheckBox {
+                            text: "Kendi sesim (mic) dahil";
+                            checked <=> root.include-mic;
+                            enabled: !root.recording && !root.processing;
+                        }
+                        CheckBox {
+                            text: "Tam çeviri de üret";
+                            checked <=> root.translate-too;
+                            enabled: !root.recording && !root.processing;
+                        }
+                    }
+                }
+            }
+        }
+
+        Button {
+            text: root.recording ? "■ Durdur ve İşle"
+                : root.processing ? "İşleniyor…"
+                : "● Kaydı Başlat";
+            primary: true;
+            enabled: !root.processing;
+            clicked => { root.toggle-record(); }
+        }
+
+        Text {
+            text: root.status;
+            color: #8a8a8a;
+            wrap: word-wrap;
+        }
+
+        TabWidget {
+            vertical-stretch: 1;
+            Tab {
+                title: "Özet";
+                TextEdit { read-only: true; wrap: word-wrap; text: root.summary-text; }
+            }
+            Tab {
+                title: "Transkript";
+                TextEdit { read-only: true; wrap: word-wrap; text: root.transcript-text; }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Text {
+                text: root.saved-path == "" ? ("config: " + root.config-path) : ("Kaydedildi: " + root.saved-path);
+                color: #8a8a8a;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "Config dosyasını aç";
+                clicked => { root.open-config(); }
+            }
+        }
+    }
+
+    // ===================== SETTINGS VIEW =====================
+    if root.show-settings : VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        Text { text: "Ayarlar"; font-size: 18px; font-weight: 700; }
+        Text {
+            text: "Sırlar (API anahtarı) burada saklanmaz. 'API anahtarı env' bir ortam değişkeni adıdır (ör. GROQ_API_KEY).";
+            color: #8a8a8a;
+            wrap: word-wrap;
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalBox {
+                spacing: 12px;
+
+                GroupBox {
+                    title: "Transkript sağlayıcısı: " + root.stt-provider;
+                    VerticalBox {
+                        spacing: 6px;
+                        Text { text: "base_url"; font-size: 12px; }
+                        LineEdit { text <=> root.e-stt-base; }
+                        Text { text: "model"; font-size: 12px; }
+                        LineEdit { text <=> root.e-stt-model; }
+                        Text { text: "API anahtarı env"; font-size: 12px; }
+                        LineEdit { text <=> root.e-stt-keyenv; placeholder-text: "(yerel sunucu için boş)"; }
+                    }
+                }
+
+                GroupBox {
+                    title: "Özet sağlayıcısı: " + root.summary-provider;
+                    VerticalBox {
+                        spacing: 6px;
+                        Text { text: "base_url"; font-size: 12px; }
+                        LineEdit { text <=> root.e-sum-base; }
+                        Text { text: "model"; font-size: 12px; }
+                        LineEdit { text <=> root.e-sum-model; }
+                        Text { text: "API anahtarı env"; font-size: 12px; }
+                        LineEdit { text <=> root.e-sum-keyenv; placeholder-text: "(yerel sunucu için boş)"; }
+                    }
+                }
+
+                GroupBox {
+                    title: "Groq chunk eşiği";
+                    VerticalBox {
+                        spacing: 6px;
+                        Text { text: "MB (free=25, dev=100)"; font-size: 12px; }
+                        LineEdit { text <=> root.e-chunk-mb; width: 120px; }
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Button {
+                text: "Kaydet";
+                primary: true;
+                clicked => { root.save-settings(); }
+            }
+            Button {
+                text: "Kapat";
+                clicked => { root.close-settings(); }
+            }
+        }
+    }
+}

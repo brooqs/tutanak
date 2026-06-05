@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "gui"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/brooqs/tutanak"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,15 @@
+[package]
+name = "tutanak-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tutanak"
+path = "src/main.rs"
+
+[dependencies]
+tutanak-core = { path = "../core" }
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }

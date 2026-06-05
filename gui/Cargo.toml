@@ -1,0 +1,18 @@
+[package]
+name = "tutanak-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tutanak-ui"
+path = "src/main.rs"
+
+[dependencies]
+tutanak-core = { path = "../core" }
+anyhow.workspace = true
+slint = "1"
+
+[build-dependencies]
+slint-build = "1"
