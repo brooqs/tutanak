@@ -20,6 +20,10 @@ export component MainWindow inherits Window {
     in-out property <bool> translate-too: false;
     in-out property <bool> include-mic: true;
 
+    in property <[string]> history-titles;
+    in-out property <int> history-index;
+    in-out property <int> active-tab: 0;
+
     in property <bool> recording: false;
     in property <bool> processing: false;
     in property <string> status: "Hazır.";
@@ -44,9 +48,14 @@ export component MainWindow inherits Window {
     callback open-settings();
     callback save-settings();
     callback close-settings();
+    callback select-history(int);
+    callback refresh-history();
+
+    VerticalLayout {
 
     // ===================== MAIN VIEW =====================
     if !root.show-settings : VerticalBox {
+        vertical-stretch: 1;
         padding: 16px;
         spacing: 12px;
 
@@ -138,26 +147,44 @@ export component MainWindow inherits Window {
             wrap: word-wrap;
         }
 
-        TabWidget {
-            vertical-stretch: 1;
-            Tab {
-                title: "Özet";
-                ScrollView {
-                    Text {
-                        width: parent.visible-width;
-                        wrap: word-wrap;
-                        text: root.summary-text == "" ? "(henüz özet yok)" : root.summary-text;
-                    }
-                }
+        HorizontalBox {
+            spacing: 8px;
+            Text { text: "Geçmiş not:"; font-size: 12px; vertical-alignment: center; }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: root.history-titles;
+                current-index <=> root.history-index;
+                enabled: !root.processing;
+                selected => { root.select-history(self.current-index); }
             }
-            Tab {
-                title: "Transkript";
-                ScrollView {
-                    Text {
-                        width: parent.visible-width;
-                        wrap: word-wrap;
-                        text: root.transcript-text == "" ? "(henüz transkript yok)" : root.transcript-text;
-                    }
+        }
+
+        // Manuel sekmeler (TabWidget yerine — yükseklik/scroll garantisi için)
+        HorizontalBox {
+            spacing: 4px;
+            Button {
+                text: "Özet";
+                primary: root.active-tab == 0;
+                clicked => { root.active-tab = 0; }
+            }
+            Button {
+                text: "Transkript";
+                primary: root.active-tab == 1;
+                clicked => { root.active-tab = 1; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        results := ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: results.visible-width;
+                padding: 4px;
+                Text {
+                    wrap: word-wrap;
+                    text: root.active-tab == 0
+                        ? (root.summary-text == "" ? "(henüz özet yok)" : root.summary-text)
+                        : (root.transcript-text == "" ? "(henüz transkript yok)" : root.transcript-text);
                 }
             }
         }
@@ -180,6 +207,7 @@ export component MainWindow inherits Window {
 
     // ===================== SETTINGS VIEW =====================
     if root.show-settings : VerticalBox {
+        vertical-stretch: 1;
         padding: 16px;
         spacing: 12px;
 
@@ -245,4 +273,6 @@ export component MainWindow inherits Window {
             }
         }
     }
+
+    } // root VerticalLayout
 }

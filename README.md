@@ -1,129 +1,142 @@
-# tutanak
+# **tutanak**
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+Linux için gizlilik odaklı, terminal kullanımı gerektirmeyen bir toplantı notu asistanı.  
+Sistem sesinizi (ve kendi mikrofonunuzu) kaydeder, yazıya döker (transkripsiyon), isteğe bağlı olarak çevirir, özetler ve sonucu bir markdown notu olarak kaydeder.  
+Hem masaüstü arayüzü (tutanak-ui) hem de komut satırı arayüzü (tutanak) aynı çekirdeği (core) paylaşır. Yazıya dökme ve özetleme altyapıları bir **sağlayıcı havuzundan (provider registry)** seçilir — Groq (bulut), **FastFlowLM** (AMD Ryzen AI NPU) veya Ollama — böylece tüm iş akışını bilgisayarınızdan hiçbir şey dışarı çıkmadan **%100 yerel olarak NPU üzerinde** çalıştırabilirsiniz.
 
-Linux için gizliliği net, terminal-suz hedefli bir toplantı-notu asistanı.
-Sistem sesini yakalar → transkript çıkarır → (gerekiyorsa) çevirir → özetler → markdown not yazar.
+## **Neden?**
 
-CLI (`tutanak`) ve masaüstü GUI (`tutanak-ui`, slint) aynı çekirdeği paylaşır. Transkript ve
-özet için **provider registry**: Groq (bulut), **FastFlowLM** (AMD Ryzen AI NPU), Ollama —
-config'den seçilir; tamamen yerel (NPU) çalıştırılabilir.
+Çoğu toplantı notu aracı yalnızca bulut tabanlıdır, gizlilik konusunda şeffaf değildir ve Linux'u her zaman arka plana iter. tutanak ise tam tersi bir felsefeyle geliştirilmiştir: öncelik yerel çalışmadır (local-first), sesinizin nereye gittiği konusunda şeffaftır ve bir terminale dokunmadan kolayca çalıştırılabilir. Aynı motor her dilde çalışır; sunulan birinci sınıf deneyim, kayıtlarının kendi donanımlarında kalmasını isteyen kullanıcıları hedefler.
 
-## Mimari (v0)
+## **Mimari**
 
-```
-capture (parecord) ─► 16kHz mono WAV ─► Groq transcribe (chunked, resumable) ─► transcript
-                                                                                   │
-                        özet (çıktı dili, map-reduce) ◄────────────────────────────┤
-                        çeviri (opsiyonel, kaynak≠hedef ise) ◄──────────────────────┘
-                                          │
-                                       markdown not  (~/.local/share/tutanak/)
-```
+`ses yakalama (parecord, mikrofon + sistem miksi) ─► 16kHz mono WAV`  
+        `│`  
+        `▼`  
+`STT motoru  ── Groq bulut │ FastFlowLM NPU │ whisper.cpp (planlanan)`  
+        `│  parçalı, devam ettirilebilir, 429 hata yönetimi, 413 yeniden parçalama`  
+        `▼`  
+`metin dökümü ──► çeviri (isteğe bağlı, kaynak dil == hedef dil ise atlanır)`  
+        `│`  
+        `▼`  
+`özet (map-reduce, hedef dil) ──► markdown notu  (~/.local/share/tutanak/)`
 
-- `core/` — pipeline kütüphanesi (capture, audio chunking, Groq engine, stitch, storage).
-- `cli/` — `tutanak` ikili (clap).
+* core/ — iş akışı kütüphanesi (tutanak-core): ses yakalama, ses parçalama, sağlayıcı motorları, metin birleştirme, not depolama.  
+* cli/ — tutanak komut satırı aracı.  
+* gui/ — Slint ile geliştirilmiş tutanak-ui masaüstü arayüzü.
 
-v0 bilinçli olarak somut (trait yok) ve her yer `anyhow`. Soyutlamalar (engine/capturer trait,
-`thiserror`) v1'de ikinci motor + GUI gelince çıkarılacak.
+İş akışı somut bir yapıya sahiptir ve bu API'yi destekleyen her bulut veya yerel sunucu için OpenAI uyumlu tek bir HTTP motoru kullanır. Yeni bir altyapı eklemek kod yazmayı gerektirmez — yapılandırma dosyasına bir sağlayıcı profili eklemeniz yeterlidir.
 
-## Gereksinimler
+## **Özellikler**
 
-- Rust (1.95+), `cargo`
-- `parecord` (pulseaudio-utils / pipewire-pulse) — sistem-ses yakalama (PulseAudio + PipeWire)
-- `ffmpeg` — `process` (dosya içe aktarma) yolu için
-- Bir Groq API anahtarı
+* **Sağlayıcı Havuzu (Provider Registry):** STT (sesi yazıya dökme) ve özetleme altyapılarını birbirinden bağımsız olarak seçebilirsiniz: Groq bulut, AMD NPU üzerinde FastFlowLM, Ollama veya OpenAI uyumlu herhangi bir sunucu. Tamamen yerel bir iş akışı (yakala → NPU ile yazıya dök → NPU ile özetle) yalnızca bir ayar değişikliği uzaklığındadır.  
+* **Mikrofon \+ Sistem Sesi Yakalama:** Hem diğer katılımcıları (sistem sesi) hem de kendi mikrofonunuzu, bir PulseAudio sanal çıkışı (null-sink) üzerinden anlık olarak karıştırarak kaydeder — böylece kendi sesiniz de notlara dahil olur. PulseAudio ve PipeWire üzerinde çalışır.  
+* **Uzun Toplantılarda Güvenilirlik:** Ses, sağlayıcının boyut sınırına göre parçalara ayrılır, istek sınırı (rate-limit) yönetimiyle yüklenir ve her parçanın metin dökümü diske önbelleğe alınır; böylece hata durumunda süreç baştan başlamak yerine kaldığı yerden devam eder.  
+* **Map-Reduce Özetleri:** LLM (büyük dil modeli) bağlam penceresini (context window) aşan uzun metin dökümleri, pencereler halinde özetlenir ve ardından birleştirilir; böylece saatler süren toplantılardan bile tek bir özet üretilir.  
+* **Otomatik Dil Yönetimi:** Kaynak dil otomatik olarak algılanır; kaynak dil çıktı dilinizle zaten eşleşiyorsa çeviri adımı atlanır.  
+* **Geçmiş:** Geçmiş notlar arayüzde listelenir ve başlangıçta yeniden yüklenir, böylece uygulama yeniden başlatıldığında asla boş görünmez.  
+* **Uygulama İçi Ayarlar:** Sağlayıcı URL'lerini, modelleri ve parça sınırlarını arayüzden düzenleyebilirsiniz; gizli anahtarlar (secrets) asla yapılandırma dosyasına açıkça yazılmaz.  
+* **Arayüz (GUI) ve Komut Satırı (CLI):** Hangisi kolayınıza gelirse onu kullanın; her ikisi de aynı çekirdeği ve yapılandırmayı paylaşır.
 
-## Kurulum
+## **Gereksinimler**
 
-```bash
-cargo build --release   # ikili: target/release/tutanak
-cargo test              # 22 unit + 4 entegrasyon (httpmock)
-```
+* Rust (1.95+) ve cargo  
+* parecord (pulseaudio-utils / pipewire-pulse paketlerinden) — hem PulseAudio hem de PipeWire üzerinde çalışan sistem sesi yakalama aracı  
+* ffmpeg — process komutu için (mevcut ses/video dosyalarını içe aktarırken kullanılır)  
+* Bir altyapı sunucusu: Groq API anahtarı, çalışan bir FastFlowLM sunucusu ve/veya Ollama
 
-## Kullanım
+## **Derleme**
 
-```bash
-export GROQ_API_KEY=gsk_...
+`cargo build --release        # derlenen dosyalar: target/release/{tutanak, tutanak-ui}`  
+`cargo test                   # birim + entegrasyon testleri (gerçek bir API gerekmez)`
 
-# Canlı: sistem sesini kaydet (ENTER ile durdur), özet çıkar
-tutanak record --title "Sprint Planlama"
+## **Kullanım**
 
-# Var olan dosyayı işle (ffmpeg ile 16kHz mono'ya çevrilir)
-tutanak process toplanti.mp4 --title "Mimari Görüşmesi"
+### **Masaüstü Arayüzü (GUI)**
 
-# Tam transkript çevirisi de iste (kaynak=hedef ise otomatik atlanır)
-tutanak record --translate
-```
+`cargo run -p tutanak-ui      # veya doğrudan target/release/tutanak-ui dosyasını çalıştırın`
 
-Notlar `~/.local/share/tutanak/<zaman>-<başlık>.md` altına yazılır.
-Uzun bir kayıt yarıda hata alırsa, **aynı `--title`/`--job` ile** tekrar çalıştır:
-tamamlanan chunk'lar `~/.cache/tutanak/<job>/` içinden resume edilir.
+Yazıya dökme ve özetleme sağlayıcılarını seçin, dili ve başlığı belirleyin, kendi mikrofonunuzu dahil etmek isteyip istemediğinizi seçin ve ardından **Kaydet (Record)** butonuna basın. Toplantı bittiğinde **Durdur (Stop)** butonuna basın. Özet ve metin dökümü sekmelerde görünecek ve not \~/.local/share/tutanak/ dizinine kaydedilecektir. Eski notlara geçmiş açılır menüsünden ulaşabilirsiniz.
 
-## Yapılandırma — provider registry
+### **Komut Satırı (CLI)**
 
-Ayarlar `~/.config/tutanak/config.toml` dosyasından okunur (UI bunu yazacak).
-Katmanlama: **varsayılan → config dosyası → ortam değişkenleri** (env üstün).
+`export GROQ_API_KEY=...                      # Yalnızca Groq sağlayıcısı için gereklidir`
 
-```bash
-tutanak config init     # yorumlu varsayılan config'i oluştur
-tutanak config show     # etkin ayarları + provider'ları göster (sır göstermez)
-tutanak config path     # dosya yolu
-```
+`# Canlı: Sistem sesini + mikrofonu kaydeder, ENTER ile durdurulur ve özet üretir`  
+`tutanak record --title "Sprint Planlama"`
 
-**Provider'lar** bir registry'dir. `stt.provider` / `summary.provider` bir profili seçer.
-Her profilin bir `kind`'i vardır:
-- `openai` — OpenAI-uyumlu herhangi bir HTTP sunucu: **Groq** (bulut), **FastFlowLM**
-  (AMD Ryzen AI NPU, `:52625`), **Ollama** (`:11434`), llama.cpp server, LocalAI...
-- `whisper-cpp` — in-process whisper.cpp (CPU/GPU) — **v1'de gelecek**.
+`# Sadece sistem sesi (mikrofonunuzu dahil etmez)`  
+`tutanak record --system-only`
 
-Yeni bir OpenAI-uyumlu backend eklemek **sıfır kod**: config'e bir `[providers.x]` ekle.
+`# Mevcut bir ses/video dosyasını işleme (ffmpeg ile 16kHz mono formatına dönüştürülür)`  
+`tutanak process toplanti.mp4 --title "Mimari Gözden Geçirme"`
 
-### Örnek: transkripti AMD NPU'da (FastFlowLM), özeti bulutta (Groq)
-```toml
-[stt]
-provider = "fastflowlm"      # NPU'da whisper-v3-turbo, gizli + hızlı
-[summary]
-provider = "groq"            # özet bulutta
-```
-(FastFlowLM sunucusu çalışıyor olmalı: `flm serve`.)
+`# Ek olarak metnin tam çevirisini de üretir (kaynak dil == hedef dil ise atlanır)`  
+`tutanak record --translate`
 
-### Örnek: tamamen yerel (NPU + Ollama) — hiçbir şey buluta gitmez
-```toml
-[stt]
-provider = "fastflowlm"
-[summary]
-provider = "ollama"
-model = "llama3.1"
-```
+`# Yapılandırma yardımcıları`  
+`tutanak config init          # Açıklamalı varsayılan yapılandırma dosyasını oluşturur`  
+`tutanak config show          # Geçerli yapılandırmayı gösterir (gizli anahtarlar gizlenir)`  
+`tutanak config path          # Yapılandırma dosyasının yolunu yazdırır`
 
-Sırlar config'de değildir: her provider `api_key_env` ile bir env değişkeni adı verir
-(Groq için `GROQ_API_KEY`). Yerel NPU/CPU sunucuları anahtar istemez.
+Notlar \~/.local/share/tutanak/\<zaman-damgasi\>-\<baslik\>.md şeklinde kaydedilir. Uzun bir işlem yarıda kalırsa, önbelleğe alınmış parçalardan devam etmek için başlangıçta yazdırılan \--job \<id\> parametresini kullanarak komutu yeniden çalıştırın.
 
-### Env override'ları (güç-kullanıcı / CI)
-| Değişken | Açıklama |
-|---|---|
-| `GROQ_API_KEY` | Groq profilinin anahtarı |
-| `TUTANAK_STT_PROVIDER` / `TUTANAK_SUMMARY_PROVIDER` | provider profilini seç |
-| `TUTANAK_STT_MODEL` / `TUTANAK_LLM_MODEL` | model override |
-| `TUTANAK_OUTPUT_LANG` | çıktı dili (varsayılan `tr`) |
-| `TUTANAK_CONFIG` | config dosyası yolu (test için) |
-| `TUTANAK_CHUNK_BYTES` | chunk eşiği (Groq free=25MB, dev=100MB) |
+## **Yapılandırma — Sağlayıcı Havuzu**
 
-## Gizlilik
+Ayarlar \~/.config/tutanak/config.toml dosyasından okunur. Öncelik sırası **varsayılanlar → yapılandırma dosyası → ortam değişkenleri** şeklindedir (ortam değişkenleri baskındır). Masaüstü arayüzü ayarları yapılandırma dosyasına yazar; ortam değişkenleri ise ileri düzey kullanıcılar ve CI (Sürekli Entegrasyon) sistemleri içindir.  
+Sağlayıcılar, adlandırılmış profillerden oluşan bir havuzdur. stt.provider / summary.provider ayarları, bir profili adıyla seçer. Her profilin bir aktarım türü (kind) vardır:
 
-Yerel saklama `~/.local/share/tutanak/`. Telemetri yok. Bulut (Groq) modunda yalnızca
-ses chunk'ları Groq'a gider. (Yerel motor v1'de gelecek; o modda hiçbir şey cihazdan çıkmaz.)
+* openai — OpenAI uyumlu herhangi bir HTTP sunucusu: **Groq** (bulut), **FastFlowLM** (AMD Ryzen AI NPU, :52625), **Ollama** (:11434), llama.cpp sunucusu vb.  
+* whisper-cpp — Uygulama içi (in-process) CPU/GPU üzerinde çalışan whisper.cpp (planlanıyor).
 
-## Test
+Gizli anahtarlar dosyada saklanmaz; bir profil api\_key\_env aracılığıyla bir ortam değişkenini işaret eder (örneğin GROQ\_API\_KEY). Yerel NPU/CPU sunucuları bir anahtara ihtiyaç duymaz.
 
-```bash
-cargo test                                   # tümü (gerçek API gerektirmez)
-GROQ_API_KEY=... TUTANAK_REAL_SMOKE=1 \
-  cargo test -- --ignored real_smoke         # opt-in gerçek API smoke
-```
+### **Örnek: AMD NPU üzerinde yazıya dökme, bulutta özetleme**
 
-## Lisans
+`[stt]`  
+`provider = "fastflowlm"      # NPU üzerinde whisper-v3-turbo, gizli ve hızlı`
 
-[GNU GPL v3 (veya üzeri)](LICENSE). Fork'lar açık kalmak zorundadır.
+`[summary]`  
+`provider = "groq"            # Bulut üzerinde özetleme`
 
-GUI [slint](https://slint.dev) ile yazıldı; slint bu projede GPLv3 seçeneği altında kullanılır.
+FastFlowLM sunucusunun çalışıyor olması gerekir. Tek bir komut, hem ASR (ses tanıma) hem de LLM uç noktalarını tek bir port üzerinden dışa açar:  
+`flm serve gemma4-it:e2b --asr 1`
+
+### **Örnek: Tamamen yerel — bilgisayardan hiçbir veri çıkmaz**
+
+`[stt]`  
+`provider = "fastflowlm"      # NPU üzerinde yazıya dökme`
+
+`[summary]`  
+`provider = "fastflowlm"      # NPU üzerinde özetleme (aynı sunucu)`
+
+### **Ortam Değişkenleri Geçersiz Kılmaları (Overrides)**
+
+| Değişken | Açıklama   |
+| :---- | :---- |
+| GROQ\_API\_KEY | Groq profili için API anahtarı |
+| TUTANAK\_STT\_PROVIDER / TUTANAK\_SUMMARY\_PROVIDER | Bir sağlayıcı profilini seçer |
+| TUTANAK\_STT\_MODEL\` / \`TUTANAK\_LLM\_MODEL | Model seçimini geçersiz kılar |
+| TUTANAK\_OUTPUT\_LANG | Çıktı dili (varsayılan tr) |
+| TUTANAK\_CONFIG | Yapılandırma dosyası yolu (testler için kullanışlıdır) |
+| TUTANAK\_CHUNK\_BYTES | Parça boyutu sınırı (Groq ücretsiz \= 25MB, geliştirici \= 100MB) |
+
+## **Gizlilik**
+
+Notlar yerel olarak \~/.local/share/tutanak/ dizininde saklanır. Herhangi bir telemetri (veri takibi) bulunmamaktadır. Bulut (Groq) modunda, sağlayıcıya yalnızca ses parçaları gönderilir. Tamamen yerel modda (FastFlowLM / Ollama) ise bilgisayarınızdan hiçbir şey dışarı çıkmaz. Masaüstü arayüzü, verilerinizin nereye gittiğini bilmeniz için hangi sağlayıcının aktif olduğunu her zaman gösterir.
+
+## **Test Etme**
+
+`cargo test                                   # Tüm testleri çalıştırır, gerçek API gerekmez`  
+`GROQ_API_KEY=... TUTANAK_REAL_SMOKE=1 \`  
+  `cargo test -- --ignored real_smoke         # Gerçek API kullanan duman (smoke) testini çalıştırır`
+
+## **Durum ve Yol Haritası**
+
+Mevcut çalışan özellikler: CLI ve GUI, sağlayıcı havuzu (Groq / FastFlowLM / Ollama), mikrofon \+ sistem sesi yakalama, devam ettirilebilir parçalı yazıya dökme, map-reduce özetleri, not geçmişi ve uygulama içi ayarlar.  
+Planlanan özellikler: Sunucu gerektirmeyen, uygulama içi çalışan bir whisper.cpp motoru, AppImage/Flatpak dağıtımları, ayarlar arayüzünden sağlayıcı ekleme/çıkarma, canlı akış (streaming) halinde yazıya dökme ve aranabilir bir not arşivi.
+
+## **Lisans**
+
+[GNU GPL v3 veya üzeri](http://docs.google.com/LICENSE). Çatallamalar (fork) açık kaynak kalmak zorundadır.  
+Masaüstü arayüzü, burada GPLv3 seçeneği altında kullanılan [Slint](https://slint.dev) ile oluşturulmuştur.

@@ -13,6 +13,7 @@
 slint::include_modules!();
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -42,6 +43,17 @@ fn main() -> Result<()> {
     }
 
     let state: Rc<RefCell<Option<Session>>> = Rc::new(RefCell::new(None));
+    let history: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Load past notes into the history dropdown; show the newest on startup.
+    refresh_history(&ui, &history);
+    {
+        let newest = history.borrow().first().cloned();
+        if let Some(p) = newest {
+            ui.set_history_index(0);
+            load_into_tabs(&ui, &p);
+        }
+    }
 
     // ---- Record / Stop ----
     {
@@ -135,6 +147,7 @@ fn main() -> Result<()> {
                             ui.set_saved_path(path.display().to_string().into());
                             let lang = if notes.language.is_empty() { "?".to_string() } else { notes.language };
                             ui.set_status(format!("Tamam (kaynak dil: {lang}).").into());
+                            ui.invoke_refresh_history(); // add the new note to the history list
                         }
                         Err(e) => ui.set_status(format!("Hata: {e:#}").into()),
                     }
@@ -199,6 +212,30 @@ fn main() -> Result<()> {
         });
     }
 
+    // ---- History: select a past note ----
+    {
+        let ui_weak = ui.as_weak();
+        let history = history.clone();
+        ui.on_select_history(move |idx| {
+            let ui = ui_weak.unwrap();
+            let path = history.borrow().get(idx.max(0) as usize).cloned();
+            if let Some(p) = path {
+                load_into_tabs(&ui, &p);
+            }
+        });
+    }
+
+    // ---- History: rebuild list (after a new note is saved) ----
+    {
+        let ui_weak = ui.as_weak();
+        let history = history.clone();
+        ui.on_refresh_history(move || {
+            let ui = ui_weak.unwrap();
+            refresh_history(&ui, &history);
+            ui.set_history_index(0);
+        });
+    }
+
     // ---- Open config file externally ----
     ui.on_open_config(move || {
         if let Ok(path) = config::config_path() {
@@ -230,6 +267,30 @@ fn fill_settings(ui: &MainWindow, cfg: &Config) {
 fn nonempty(s: SharedString) -> Option<String> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t.to_string()) }
+}
+
+/// Rebuild the history dropdown from saved notes; store their paths (newest first).
+fn refresh_history(ui: &MainWindow, paths: &Rc<RefCell<Vec<PathBuf>>>) {
+    let entries = storage::list_notes().unwrap_or_default();
+    let labels: Vec<SharedString> = entries.iter().map(|e| e.label.as_str().into()).collect();
+    ui.set_history_titles(ModelRc::from(Rc::new(VecModel::from(labels))));
+    *paths.borrow_mut() = entries.into_iter().map(|e| e.path).collect();
+}
+
+/// Load a saved note from disk into the Özet / Transkript tabs.
+fn load_into_tabs(ui: &MainWindow, path: &Path) {
+    if let Ok(n) = storage::load_note(path) {
+        ui.set_summary_text(n.summary.into());
+        let mut body = String::new();
+        if let Some(tr) = &n.translation {
+            body.push_str("== Çeviri ==\n");
+            body.push_str(tr);
+            body.push_str("\n\n== Transkript ==\n");
+        }
+        body.push_str(&n.transcript);
+        ui.set_transcript_text(body.into());
+        ui.set_saved_path(path.display().to_string().into());
+    }
 }
 
 fn start_recording(source: capture::Source) -> Result<Session> {
