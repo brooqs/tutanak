@@ -142,11 +142,23 @@ export component MainWindow inherits Window {
             vertical-stretch: 1;
             Tab {
                 title: "Özet";
-                TextEdit { read-only: true; wrap: word-wrap; text: root.summary-text; }
+                ScrollView {
+                    Text {
+                        width: parent.visible-width;
+                        wrap: word-wrap;
+                        text: root.summary-text == "" ? "(henüz özet yok)" : root.summary-text;
+                    }
+                }
             }
             Tab {
                 title: "Transkript";
-                TextEdit { read-only: true; wrap: word-wrap; text: root.transcript-text; }
+                ScrollView {
+                    Text {
+                        width: parent.visible-width;
+                        wrap: word-wrap;
+                        text: root.transcript-text == "" ? "(henüz transkript yok)" : root.transcript-text;
+                    }
+                }
             }
         }
 
